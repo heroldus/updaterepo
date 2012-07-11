@@ -30,6 +30,13 @@ class AppendingMetaDataSqlite(MetaDataSqlite):
     def __init__(self, destdir):
         MetaDataSqlite.__init__(self, destdir)
         
+    def getPackageIndex(self):
+        index = {}
+        result = executeSQL(self.pri_cx, "SELECT pkgKey, location_href FROM packages;").fetchall()
+        for row in result:
+            index[row[1]] = row[0]
+        return index
+        
     def containsPackage(self, po):
         result = executeSQL(self.pri_cx, "SELECT count(*) FROM packages WHERE name = ? AND arch = ? AND version = ? AND epoch = ? AND release = ?;", (po.name, po.arch, po.version, po.epoch, po.release)).fetchall()
         count = result[0][0]
@@ -40,25 +47,33 @@ class AppendingMetaDataSqlite(MetaDataSqlite):
     
     def generateNewPackageNumber(self):
         result = executeSQL(self.pri_cx, 'SELECT MAX(pkgKey) FROM packages;').fetchall()
-        return result[0][0] + 1
+        maxPkgKey = result[0][0]
+        
+        if maxPkgKey is not None:
+            return maxPkgKey + 1
+        else:
+            return 1
         
     def create_primary_db(self):
-        self.check_or_create(self.pri_cx, 18, MetaDataSqlite.create_primary_db)
+        self.check_or_create(self.pri_cx, 7, MetaDataSqlite.create_primary_db)
     
     def create_filelists_db(self):
-        self.check_or_create(self.file_cx, 7, MetaDataSqlite.create_filelists_db)
+        self.check_or_create(self.file_cx, 3, MetaDataSqlite.create_filelists_db)
     
     def create_other_db(self):
-        self.check_or_create(self.other_cx, 6, MetaDataSqlite.create_other_db)
+        self.check_or_create(self.other_cx, 3, MetaDataSqlite.create_other_db)
     
     def check_or_create(self, cursor, expected_count, create_method):
-        result = executeSQL(cursor, 'select count(*) from sqlite_master;').fetchall()
+        result = executeSQL(cursor, 'select count(*) from sqlite_master where type="table";').fetchall()
         object_count = result[0][0]
         if object_count == 0:
             print 'Create db ...'
             create_method(self)
         elif object_count != expected_count:
             raise MDError('DB exists, but has wrong table count. Was ' + object_count.__str__() + ', expected: ' + expected_count.__str__())
+        
+    def removePkgKey(self, pkgKey):
+        executeSQL(self.pri_cx, "delete from packages where pkgKey = ?;", (pkgKey, ))
     
 def uncompressDB(from_file, to_file):
     if os.path.exists(from_file):
@@ -103,17 +118,49 @@ CreateRepoPackage._return_primary_dirs = _return_primary_dirs
 
 class UpdateRepo(object):
     
-    def __init__(self, directory, rpm_to_add):
+    def __init__(self, directory):
         self.config = createrepo.MetaDataConfig()
         self.config.directory = directory
         self.config.database_only = True
         self.output_dir = os.path.join(self.config.directory, 'repodata')
         self.temp_dir = os.path.join(self.config.directory, '.repodata')
-        self.rpm = rpm_to_add
 
     def execute(self):
         self.reuseExistingMetadata()
+        self.generator = createrepo.MetaDataGenerator(self.config)
+        self.generator.md_sqlite = AppendingMetaDataSqlite(self.temp_dir)
+        self.nextPkgKey = self.generator.md_sqlite.generateNewPackageNumber()
+        
+        packagesInDb = self.generator.md_sqlite.getPackageIndex()
+        packagesInDbKeys = set(packagesInDb.keys())
+        packagesFoundOnDisk = set(self.listRpms())
+        
+        packagesToDelete = list(packagesInDbKeys - packagesFoundOnDisk)
+        packagesToAdd = list(packagesFoundOnDisk - packagesInDbKeys)
+        
+        print "Delete: " + packagesToDelete.__str__()
+        print "Add : " + packagesToAdd.__str__()
+        
+        for package in packagesToDelete:
+            pkgKey = packagesInDb[package]
+            self.generator.md_sqlite.removePkgKey(pkgKey)
+            
+        for package in packagesToAdd:
+            self.addRpm(package)
+        
         self.generateMetaData()
+        
+    def listRpms(self):
+        dirLength = len(self.config.directory)
+        rpms = []
+        for root, dirnames, files in os.walk(self.config.directory):
+            relpath = root[dirLength:]
+            for name in files:
+                if name.endswith('.rpm'):
+                    rpms.append(os.path.join(relpath, name))
+                    
+        return rpms
+        
 
     def reuseExistingMetadata(self):
         if os.path.exists(self.temp_dir):
@@ -123,28 +170,24 @@ class UpdateRepo(object):
         uncompressDBs(self.output_dir, self.temp_dir)
 
     def generateMetaData(self):
-        generator = createrepo.MetaDataGenerator(self.config)
+        self.generator.closeMetadataDocs()
+        self.generator.doRepoMetadata()
+        self.generator.doFinalMove()
         
-        generator.md_sqlite = AppendingMetaDataSqlite(self.temp_dir)
+    def addRpm(self, rpm):
+        po = self.generator.read_in_package(rpm)
         
-        self.addRpm(generator, self.rpm)
-        
-        generator.closeMetadataDocs()
-        generator.doRepoMetadata()
-        
-    def addRpm(self, generator, rpm):
-        po = generator.read_in_package(rpm)
-        
-        if generator.md_sqlite.containsPackage(po):
+        if self.generator.md_sqlite.containsPackage(po):
             print 'Package ' + po.__str__() + ' already included.'
         else:
-            po.crp_reldir = rpm
-            po.crp_packagenumber = generator.md_sqlite.generateNewPackageNumber()
+            po.crp_reldir = self.config.directory
+            po.crp_packagenumber = self.nextPkgKey
+            self.nextPkgKey += 1
             po.crp_baseurl = ''
             
-            po.do_sqlite_dump(generator.md_sqlite)
+            po.do_sqlite_dump(self.generator.md_sqlite)
+        
+    
             
-            
-            
-# UpdateRepo('/Users/she/temp/repo', 'mod_python.rpm').execute()
+# UpdateRepo('/Users/she/temp/repo2').execute()
 

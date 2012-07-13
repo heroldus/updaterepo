@@ -26,4 +26,35 @@ To use *updaterepo* you need the following dependencies:
 Usage
 -----
 
-	./updaterepo.py
+	./updaterepo.py /path/to/your/repository
+	
+Performance
+-----------
+
+### Delete Update Performance ###
+
+Create a repository with 15 rpms (ca. 500kb per rpm) using:
+
+	createrepo --update -v -d --skip-stat -c /tmp/empty-cache-dir .
+	
+Remove 2 rpms:
+
+	rm blabla*.rpm
+	
+Update repository with createrepo:
+
+	time createrepo --update -v -d --skip-stat -c /tmp/empty-cache-dir .
+	
+	real	0m0.406s
+	user	0m0.248s
+	sys 	0m0.090s
+	
+Same update with updaterepo.py
+
+	time updaterepo.py .
+	
+	real	0m0.254s
+	user	0m0.172s
+	sys 	0m0.079s
+	
+**Result: Nearly 40% faster.**

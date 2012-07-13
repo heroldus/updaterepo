@@ -15,6 +15,7 @@
 # Copyright 2012 Sebastian Herold
 
 import os
+import sys
 import shutil
 
 from bz2 import BZ2File
@@ -120,7 +121,10 @@ class UpdateRepo(object):
     
     def __init__(self, directory):
         self.config = createrepo.MetaDataConfig()
-        self.config.directory = directory
+        if not directory.endswith('/'):
+            self.config.directory = directory + '/'
+        else:
+            self.config.directory = directory
         self.config.database_only = True
         self.output_dir = os.path.join(self.config.directory, 'repodata')
         self.temp_dir = os.path.join(self.config.directory, '.repodata')
@@ -187,7 +191,10 @@ class UpdateRepo(object):
             
             po.do_sqlite_dump(self.generator.md_sqlite)
         
-    
-            
-# UpdateRepo('/Users/she/temp/repo2').execute()
+if __name__ == '__main__':
+    if len(sys.argv) < 2:
+        print "ERROR: Please provide a directory to update: updaterepo /path/to/your/repo"
+        exit(1)
+    else:
+        UpdateRepo(sys.argv[1]).execute()
 

@@ -150,7 +150,10 @@ class UpdateRepo(object):
             self.generator.md_sqlite.removePkgKey(pkgKey)
             
         for package in packagesToAdd:
-            self.addRpm(package)
+            try:
+                self.addRpm(package)
+            except Exception as e:
+                print "Error adding %s: %s" % (package, e)
         
         self.generateMetaData()
         

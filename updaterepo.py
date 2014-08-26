@@ -196,5 +196,5 @@ if __name__ == '__main__':
         print "ERROR: Please provide a directory to update: updaterepo /path/to/your/repo"
         exit(1)
     else:
-        UpdateRepo(sys.argv[1]).execute()
+        UpdateRepo(os.path.realpath(sys.argv[1])).execute()
 
